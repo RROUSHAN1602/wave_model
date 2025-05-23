@@ -5,4 +5,5 @@ plotly
 pyotp
 prophet
 scipy
-SmartApi
+smartapi
+
