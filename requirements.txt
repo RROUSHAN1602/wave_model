@@ -5,5 +5,7 @@ plotly
 pyotp
 prophet
 scipy
-smartapi
+SmartApi-python
+websocket-client
+logzero
 
