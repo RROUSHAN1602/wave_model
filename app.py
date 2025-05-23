@@ -15,7 +15,6 @@ from scipy.signal import argrelextrema
 from SmartApi.smartConnect import SmartConnect
 
 
-
 st.set_page_config(page_title="Wave & Prophet Scanner", layout="wide")
 
 # --- Angel One credentials (hard‐coded) ---
@@ -227,31 +226,32 @@ tab1, tab2, tab3 = st.tabs([
 # Tab 1: Home
 with tab1:
     st.header("Elliott Wave Scanner")
-    start_date = st.date_input("Start date", datetime.date.today()-datetime.timedelta(days=90), key="w1")
-    end_date   = st.date_input("End date",   datetime.date.today(),                           key="w2")
+    start_date = st.date_input("Start date", datetime.date.today() - datetime.timedelta(days=90), key="w1")
+    end_date = st.date_input("End date", datetime.date.today(), key="w2")
 
     if st.button("▶️ Run wave scan"):
         wave_results = []
         prog = st.progress(0)
         for i, sym in enumerate(symbols, start=1):
             df = fetch_price_data(token_map[sym], start_date, end_date)
-            w  = identify_elliott_wave(df)
+            w = identify_elliott_wave(df)
             if w:
-                wave_results.append({'Ticker':sym, **w})
-            prog.progress(i/len(symbols))
+                wave_results.append({'Ticker': sym, **w})
+            prog.progress(i / len(symbols))
+            time.sleep(0.3)  # 👈 Throttle to avoid API rate limit
 
         if not wave_results:
             st.info("No stocks met the Elliott wave criteria.")
         else:
             df_wave = pd.DataFrame(wave_results)
             df_wave = df_wave[[
-                'Ticker','probability','retracement',
-                'wave1_start_date','wave1_end_date','wave2_end_date',
+                'Ticker', 'probability', 'retracement',
+                'wave1_start_date', 'wave1_end_date', 'wave2_end_date',
                 'volume_confirmation'
             ]]
             df_wave.columns = [
-                'Ticker','Probability','Retracement',
-                'Wave1Start','Wave1End','Wave2End',
+                'Ticker', 'Probability', 'Retracement',
+                'Wave1Start', 'Wave1End', 'Wave2End',
                 'VolConfirm'
             ]
             df_wave.sort_values('Probability', ascending=False, inplace=True)
@@ -261,7 +261,7 @@ with tab1:
             st.download_button(
                 "📥 Download wave results CSV",
                 to_csv_bytes(df_wave),
-                "wave_results.csv","text/csv"
+                "wave_results.csv", "text/csv"
             )
 
             for row in df_wave.itertuples(index=False):
@@ -284,52 +284,48 @@ with tab1:
 # Tab 2: Prophet Only
 with tab2:
     st.header("Prophet Only")
-    p_start = st.date_input("Start date", datetime.date.today()-datetime.timedelta(days=90), key="p1")
-    p_end   = st.date_input("End date",   datetime.date.today(),                           key="p2")
-    ticker  = st.selectbox("Ticker", ["-- Select --"] + symbols, key="p3")
+    p_start = st.date_input("Start date", datetime.date.today() - datetime.timedelta(days=90), key="p1")
+    p_end = st.date_input("End date", datetime.date.today(), key="p2")
+    ticker = st.selectbox("Ticker", ["-- Select --"] + symbols, key="p3")
 
     if ticker != "-- Select --" and st.button("▶️ Generate forecast", key="p4"):
         dfp = fetch_price_data(token_map[ticker], p_start, p_end)
+        time.sleep(0.4)  # 👈 Throttle API call
         if not dfp.empty:
-            fig, fc2 = get_prophet_chart(dfp, ticker)
+            wave_data = identify_elliott_wave(dfp)
+            wave2_date = wave_data['wave2_end_date'] if wave_data else None
+            fig, fc2 = get_prophet_chart(dfp, ticker, wave2_date)
             st.plotly_chart(fig, use_container_width=True)
             st.subheader("Forecast Data")
             st.dataframe(fc2, use_container_width=True)
             st.download_button(
                 "📥 Download forecast CSV",
                 to_csv_bytes(fc2),
-                f"{ticker}_forecast.csv","text/csv"
+                f"{ticker}_forecast.csv", "text/csv"
             )
         else:
             st.warning("No data returned.")
 
-# Tab 3: Outlier Filter (deduped + two charts/row)
+# Tab 3: Outlier Filter
 with tab3:
     st.header("Outlier Filter")
-    o_start = st.date_input(
-        "History start",
-        datetime.date.today()-datetime.timedelta(days=90),
-        key="o1"
-    )
-    o_end   = st.date_input(
-        "History end",
-        datetime.date.today(),
-        key="o2"
-    )
+    o_start = st.date_input("History start", datetime.date.today() - datetime.timedelta(days=90), key="o1")
+    o_end = st.date_input("History end", datetime.date.today(), key="o2")
 
     if st.button("▶️ Find outliers", key="o3"):
         outliers = []
         prog = st.progress(0)
         for i, sym in enumerate(symbols, start=1):
             df = fetch_price_data(token_map[sym], o_start, o_end)
+            time.sleep(0.2)  # 👈 Add delay between API requests
             df['ds'] = df['Date'].dt.normalize()
-            dfp   = df[['ds','Close']].rename(columns={'ds':'ds','Close':'y'})
-            m     = Prophet(daily_seasonality=True)
+            dfp = df[['ds', 'Close']].rename(columns={'ds': 'ds', 'Close': 'y'})
+            m = Prophet(daily_seasonality=True)
             m.fit(dfp)
             fc2 = m.predict(m.make_future_dataframe(periods=0))
             merged = pd.merge(
-                df[['ds','Close']],
-                fc2[['ds','yhat','yhat_lower','yhat_upper']],
+                df[['ds', 'Close']],
+                fc2[['ds', 'yhat', 'yhat_lower', 'yhat_upper']],
                 on='ds', how='inner'
             )
             bad = merged[
@@ -338,44 +334,40 @@ with tab3:
             ]
             for _, r in bad.iterrows():
                 outliers.append({
-                    'Ticker':   sym,
-                    'Date':     r.ds.date(),
-                    'Actual':   r.Close,
-                    'Lower':    r.yhat_lower,
-                    'Upper':    r.yhat_upper,
+                    'Ticker': sym,
+                    'Date': r.ds.date(),
+                    'Actual': r.Close,
+                    'Lower': r.yhat_lower,
+                    'Upper': r.yhat_upper,
                     'Forecast': r.yhat
                 })
-            prog.progress(i/len(symbols))
+            prog.progress(i / len(symbols))
 
         if not outliers:
             st.info("No outliers detected in that batch.")
         else:
             df_out = pd.DataFrame(outliers)
-            df_latest = (
-                df_out.sort_values('Date')
-                      .groupby('Ticker', as_index=False)
-                      .last()
-            )
+            df_latest = df_out.sort_values('Date').groupby('Ticker', as_index=False).last()
+
             st.subheader("Latest Outlier per Ticker")
-            st.dataframe(
-                df_latest[['Ticker','Date','Actual','Lower','Upper','Forecast']],
-                use_container_width=True
-            )
+            st.dataframe(df_latest[['Ticker', 'Date', 'Actual', 'Lower', 'Upper', 'Forecast']], use_container_width=True)
             st.download_button(
                 "📥 Download latest outliers CSV",
                 to_csv_bytes(df_latest),
-                "latest_outliers.csv","text/csv"
+                "latest_outliers.csv", "text/csv"
             )
 
             for row in df_latest.itertuples(index=False):
                 ticker = row.Ticker
-                dsel   = row.Date
+                dsel = row.Date
                 st.markdown(f"### {ticker} · Outlier on {dsel}")
                 dfc = fetch_price_data(token_map[ticker], o_start, o_end)
+                time.sleep(0.4)  # 👈 Add delay again
                 dfc['ds'] = dfc['Date'].dt.normalize()
-                dfp2 = dfc[['ds','Close']].rename(columns={'ds':'ds','Close':'y'})
-                m2   = Prophet(daily_seasonality=True); m2.fit(dfp2)
-                fc2  = m2.predict(m2.make_future_dataframe(periods=0))
+                dfp2 = dfc[['ds', 'Close']].rename(columns={'ds': 'ds', 'Close': 'y'})
+                m2 = Prophet(daily_seasonality=True)
+                m2.fit(dfp2)
+                fc2 = m2.predict(m2.make_future_dataframe(periods=0))
 
                 col1, col2 = st.columns(2)
                 with col1:
