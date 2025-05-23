@@ -2,6 +2,7 @@ streamlit
 pandas
 numpy
 plotly
+pyotp
 prophet
 scipy
 SmartApi
