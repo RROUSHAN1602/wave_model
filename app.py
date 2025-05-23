@@ -238,7 +238,7 @@ with tab1:
             if w:
                 wave_results.append({'Ticker': sym, **w})
             prog.progress(i / len(symbols))
-            time.sleep(0.3)  # 👈 Throttle to avoid API rate limit
+            time.sleep(0.4)  # 👈 Throttle to avoid API rate limit
 
         if not wave_results:
             st.info("No stocks met the Elliott wave criteria.")
@@ -317,7 +317,7 @@ with tab3:
         prog = st.progress(0)
         for i, sym in enumerate(symbols, start=1):
             df = fetch_price_data(token_map[sym], o_start, o_end)
-            time.sleep(0.2)  # 👈 Add delay between API requests
+            time.sleep(0.4)  # 👈 Add delay between API requests
             df['ds'] = df['Date'].dt.normalize()
             dfp = df[['ds', 'Close']].rename(columns={'ds': 'ds', 'Close': 'y'})
             m = Prophet(daily_seasonality=True)
