@@ -12,7 +12,8 @@ import plotly.graph_objects as go
 import pyotp
 from prophet import Prophet
 from scipy.signal import argrelextrema
-from smartapi import SmartConnect
+from SmartApi.smartConnect import SmartConnect
+
 
 
 st.set_page_config(page_title="Wave & Prophet Scanner", layout="wide")
