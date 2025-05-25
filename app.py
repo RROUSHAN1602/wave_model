@@ -126,30 +126,44 @@ def get_wave_chart(df, wave, ticker):
     )
     return fig
 
-# --- 7) Plotly Prophet chart (wave2_date optional) ---
+# --- Updated get_prophet_chart with data‐size guard ---
 def get_prophet_chart(df, ticker, wave2_date=None):
-    dfp = df[['Date','Close']].rename(columns={'Date':'ds','Close':'y'})
-    m   = Prophet(daily_seasonality=True)
-    m.fit(dfp)
+    import streamlit as st
+    from prophet import Prophet
+    import pandas as pd
+    import plotly.graph_objects as go
 
+    # 1) Prepare Prophet input
+    dfp = df[['Date', 'Close']].rename(columns={'Date': 'ds', 'Close': 'y'})
+    dfp_clean = dfp.dropna(subset=['ds', 'y'])
+
+    # 2) Guard: need at least 2 valid rows
+    if len(dfp_clean) < 2:
+        st.warning(f"Insufficient data to fit Prophet for {ticker}: need ≥2 valid rows.")
+        return None, None
+
+    # 3) Fit and forecast
+    m = Prophet(daily_seasonality=True)
+    m.fit(dfp_clean)
     future = m.make_future_dataframe(periods=0)
-    fc     = m.predict(future)
+    fc = m.predict(future)
 
+    # 4) Build Plotly figure
     fig = go.Figure()
-    # Actual points
+    # actual points
     fig.add_trace(go.Scatter(
         x=df['Date'], y=df['Close'], mode='markers',
         marker=dict(color='black', size=6),
         name='Actual',
         hovertemplate='Date: %{x|%Y-%m-%d}<br>Close: %{y:.2f}<extra></extra>'
     ))
-    # Forecast line
+    # forecast line
     fig.add_trace(go.Scatter(
         x=fc['ds'], y=fc['yhat'], mode='lines',
         line=dict(color='blue'), name='Forecast',
         hovertemplate='Date: %{x|%Y-%m-%d}<br>Fit: %{y:.2f}<extra></extra>'
     ))
-    # Confidence band
+    # confidence band
     fig.add_trace(go.Scatter(
         x=pd.concat([fc['ds'], fc['ds'][::-1]]),
         y=pd.concat([fc['yhat_upper'], fc['yhat_lower'][::-1]]),
@@ -158,12 +172,13 @@ def get_prophet_chart(df, ticker, wave2_date=None):
         name='95% Interval',
         hoverinfo='skip'
     ))
-    # Optional Wave 2 marker
+    # optional Wave 2 marker
     if wave2_date is not None:
         price_w2 = df.loc[df['Date'].dt.date == wave2_date, 'Close'].iloc[0]
         fig.add_trace(go.Scatter(
             x=[wave2_date], y=[price_w2], mode='markers',
-            marker=dict(symbol='star', size=14, color='orange', line=dict(width=1, color='black')),
+            marker=dict(symbol='star', size=14, color='orange',
+                        line=dict(width=1, color='black')),
             name='Wave 2 End',
             hovertemplate='Wave 2 End: %{x|%Y-%m-%d}<br>Price: %{y:.2f}<extra></extra>'
         ))
@@ -173,7 +188,9 @@ def get_prophet_chart(df, ticker, wave2_date=None):
         xaxis_title='Date', yaxis_title='Price',
         hovermode='x unified', height=350
     )
+
     return fig, fc
+
 
 # --- 8) Plotly Outlier chart ---
 def get_outlier_chart(dfc, fc2, dsel, ticker):
@@ -285,47 +302,81 @@ with tab1:
 with tab2:
     st.header("Prophet Only")
     p_start = st.date_input("Start date", datetime.date.today() - datetime.timedelta(days=90), key="p1")
-    p_end = st.date_input("End date", datetime.date.today(), key="p2")
-    ticker = st.selectbox("Ticker", ["-- Select --"] + symbols, key="p3")
+    p_end   = st.date_input("End date",   datetime.date.today(),                            key="p2")
+    ticker  = st.selectbox("Ticker", ["-- Select --"] + symbols,                          key="p3")
 
     if ticker != "-- Select --" and st.button("▶️ Generate forecast", key="p4"):
-        dfp = fetch_price_data(token_map[ticker], p_start, p_end)
-        time.sleep(0.4)  # 👈 Throttle API call
-        if not dfp.empty:
-            wave_data = identify_elliott_wave(dfp)
-            wave2_date = wave_data['wave2_end_date'] if wave_data else None
-            fig, fc2 = get_prophet_chart(dfp, ticker, wave2_date)
-            st.plotly_chart(fig, use_container_width=True)
-            st.subheader("Forecast Data")
-            st.dataframe(fc2, use_container_width=True)
-            st.download_button(
-                "📥 Download forecast CSV",
-                to_csv_bytes(fc2),
-                f"{ticker}_forecast.csv", "text/csv"
-            )
-        else:
+        # 1) Fetch raw OHLC data
+        df_raw = fetch_price_data(token_map[ticker], p_start, p_end)
+        time.sleep(0.4)  # throttle
+
+        if df_raw.empty:
             st.warning("No data returned.")
+        else:
+            # 2) Prepare and clean for Prophet
+            dfp = (
+                df_raw[['Date','Close']]
+                .rename(columns={'Date':'ds','Close':'y'})
+                .dropna(subset=['ds','y'])
+            )
+
+            # 3) Guard against too-few rows
+            if len(dfp) < 2:
+                st.warning("Insufficient data to generate forecast (need ≥2 valid rows).")
+            else:
+                # 4) Optional: mark Wave-2 end if wave exists
+                wave_data  = identify_elliott_wave(df_raw)
+                wave2_date = wave_data['wave2_end_date'] if wave_data else None
+
+                # 5) Plot & display
+                fig, fc2 = get_prophet_chart(df_raw, ticker, wave2_date)
+                st.plotly_chart(fig, use_container_width=True)
+
+                st.subheader("Forecast Data")
+                st.dataframe(fc2, use_container_width=True)
+                st.download_button(
+                    "📥 Download forecast CSV",
+                    to_csv_bytes(fc2),
+                    f"{ticker}_forecast.csv",
+                    "text/csv"
+                )
 
 # Tab 3: Outlier Filter
 with tab3:
     st.header("Outlier Filter")
     o_start = st.date_input("History start", datetime.date.today() - datetime.timedelta(days=90), key="o1")
-    o_end = st.date_input("History end", datetime.date.today(), key="o2")
+    o_end   = st.date_input("History end",   datetime.date.today(),                             key="o2")
 
     if st.button("▶️ Find outliers", key="o3"):
         outliers = []
         prog = st.progress(0)
+
         for i, sym in enumerate(symbols, start=1):
             df = fetch_price_data(token_map[sym], o_start, o_end)
-            time.sleep(0.4)  # 👈 Add delay between API requests
+            time.sleep(0.4)
+
+            # normalize date and prepare Prophet input
             df['ds'] = df['Date'].dt.normalize()
-            dfp = df[['ds', 'Close']].rename(columns={'ds': 'ds', 'Close': 'y'})
+            dfp = (
+                df[['ds','Close']]
+                .rename(columns={'ds':'ds','Close':'y'})
+                .dropna(subset=['ds','y'])
+            )
+
+            # skip if too few data points
+            if len(dfp) < 2:
+                prog.progress(i / len(symbols))
+                continue
+
+            # fit and forecast
             m = Prophet(daily_seasonality=True)
             m.fit(dfp)
             fc2 = m.predict(m.make_future_dataframe(periods=0))
+
+            # detect outliers
             merged = pd.merge(
-                df[['ds', 'Close']],
-                fc2[['ds', 'yhat', 'yhat_lower', 'yhat_upper']],
+                df[['ds','Close']],
+                fc2[['ds','yhat','yhat_lower','yhat_upper']],
                 on='ds', how='inner'
             )
             bad = merged[
@@ -334,38 +385,50 @@ with tab3:
             ]
             for _, r in bad.iterrows():
                 outliers.append({
-                    'Ticker': sym,
-                    'Date': r.ds.date(),
-                    'Actual': r.Close,
-                    'Lower': r.yhat_lower,
-                    'Upper': r.yhat_upper,
-                    'Forecast': r.yhat
+                    'Ticker':  sym,
+                    'Date':    r.ds.date(),
+                    'Actual':  r.Close,
+                    'Lower':   r.yhat_lower,
+                    'Upper':   r.yhat_upper,
+                    'Forecast':r.yhat
                 })
+
             prog.progress(i / len(symbols))
 
         if not outliers:
             st.info("No outliers detected in that batch.")
         else:
-            df_out = pd.DataFrame(outliers)
+            df_out    = pd.DataFrame(outliers)
             df_latest = df_out.sort_values('Date').groupby('Ticker', as_index=False).last()
 
             st.subheader("Latest Outlier per Ticker")
-            st.dataframe(df_latest[['Ticker', 'Date', 'Actual', 'Lower', 'Upper', 'Forecast']], use_container_width=True)
+            st.dataframe(
+                df_latest[['Ticker','Date','Actual','Lower','Upper','Forecast']],
+                use_container_width=True
+            )
             st.download_button(
                 "📥 Download latest outliers CSV",
                 to_csv_bytes(df_latest),
-                "latest_outliers.csv", "text/csv"
+                "latest_outliers.csv",
+                "text/csv"
             )
 
             for row in df_latest.itertuples(index=False):
                 ticker = row.Ticker
-                dsel = row.Date
+                dsel   = row.Date
+
                 st.markdown(f"### {ticker} · Outlier on {dsel}")
                 dfc = fetch_price_data(token_map[ticker], o_start, o_end)
-                time.sleep(0.4)  # 👈 Add delay again
+                time.sleep(0.4)
+
                 dfc['ds'] = dfc['Date'].dt.normalize()
-                dfp2 = dfc[['ds', 'Close']].rename(columns={'ds': 'ds', 'Close': 'y'})
-                m2 = Prophet(daily_seasonality=True)
+                dfp2 = (
+                    dfc[['ds','Close']]
+                    .rename(columns={'ds':'ds','Close':'y'})
+                    .dropna(subset=['ds','y'])
+                )
+
+                m2  = Prophet(daily_seasonality=True)
                 m2.fit(dfp2)
                 fc2 = m2.predict(m2.make_future_dataframe(periods=0))
 
