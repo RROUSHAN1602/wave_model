@@ -1,5 +1,3 @@
-# app.py
-
 import math
 import time
 import datetime
@@ -14,10 +12,9 @@ from prophet import Prophet
 from scipy.signal import argrelextrema
 from SmartApi.smartConnect import SmartConnect
 
-
 st.set_page_config(page_title="Wave & Prophet Scanner", layout="wide")
 
-# --- Angel One credentials (hard‐coded) ---
+# --- Angel One credentials (hard-coded) ---
 API_KEY     = "EKa93pFu"
 CLIENT_ID   = "R59803990"
 PASSWORD    = "1234"
@@ -69,7 +66,10 @@ def fetch_price_data(token: str, start_date: datetime.date, end_date: datetime.d
     resp = client.getCandleData(params)
     time.sleep(0.3)
     df = pd.DataFrame(resp["data"], columns=['Date','Open','High','Low','Close','Volume'])
-    df['Date'] = pd.to_datetime(df['Date']).dt.tz_convert(None)
+    
+    # === FIXED: parse 'Date' as naive datetime, drop tz_convert ===
+    df['Date'] = pd.to_datetime(df['Date'])
+    
     return df
 
 # --- 5) Elliott Wave detection ---
@@ -126,7 +126,7 @@ def get_wave_chart(df, wave, ticker):
     )
     return fig
 
-# --- Updated get_prophet_chart with data‐size guard ---
+# --- Updated get_prophet_chart with data-size guard ---
 def get_prophet_chart(df, ticker, wave2_date=None):
     import streamlit as st
     from prophet import Prophet
@@ -190,7 +190,6 @@ def get_prophet_chart(df, ticker, wave2_date=None):
     )
 
     return fig, fc
-
 
 # --- 8) Plotly Outlier chart ---
 def get_outlier_chart(dfc, fc2, dsel, ticker):
