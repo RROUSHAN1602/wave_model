@@ -67,9 +67,14 @@ def fetch_price_data(token: str, start_date: datetime.date, end_date: datetime.d
     time.sleep(0.3)
     df = pd.DataFrame(resp["data"], columns=['Date','Open','High','Low','Close','Volume'])
     
-    # ► Parse Date as naive datetime (no tz_convert)
-    df['Date'] = pd.to_datetime(df['Date'])
-    
+    # ► Parse Date as datetime, then strip any timezone if present
+    dt = pd.to_datetime(df['Date'])
+    try:
+        dt = dt.dt.tz_convert(None)
+    except (AttributeError, TypeError):
+        # if `dt` is already tz‐naive, this will fail—ignore in that case
+        pass
+    df['Date'] = dt
     return df
 
 # --- 5) Elliott Wave detection ---
@@ -131,36 +136,51 @@ def get_wave_chart(df, wave, ticker):
     )
     return fig
 
-# --- 7) Prophet chart builder ---
+# --- 7) Prophet chart builder (strip tz from 'ds' before fitting) ---
 def get_prophet_chart(df, ticker, wave2_date=None):
     import pandas as pd
     import plotly.graph_objects as go
     from prophet import Prophet
     import streamlit as st
 
+    # 1) Rename for Prophet (ds, y)
     dfp = df[['Date', 'Close']].rename(columns={'Date': 'ds', 'Close': 'y'})
-    dfp_clean = dfp.dropna(subset=['ds', 'y'])
+    dfp_clean = dfp.dropna(subset=['ds','y']).copy()
+
+    # 2) Ensure 'ds' is tz-naive
+    try:
+        dfp_clean['ds'] = pd.to_datetime(dfp_clean['ds']).dt.tz_convert(None)
+    except (AttributeError, TypeError):
+        # Already tz-naive, or no tz info → ignore
+        dfp_clean['ds'] = pd.to_datetime(dfp_clean['ds'])
+
+    # 3) Must have at least 2 rows
     if len(dfp_clean) < 2:
         st.warning(f"Insufficient data to fit Prophet for {ticker}: need ≥2 valid rows.")
         return None, None
 
+    # 4) Fit Prophet
     m = Prophet(daily_seasonality=True)
     m.fit(dfp_clean)
     future = m.make_future_dataframe(periods=0)
     fc = m.predict(future)
 
+    # 5) Build Plotly figure
     fig = go.Figure()
+    # Actual points:
     fig.add_trace(go.Scatter(
         x=df['Date'], y=df['Close'], mode='markers',
         marker=dict(color='black', size=6),
         name='Actual',
         hovertemplate='Date: %{x|%Y-%m-%d}<br>Close: %{y:.2f}<extra></extra>'
     ))
+    # Forecast line:
     fig.add_trace(go.Scatter(
         x=fc['ds'], y=fc['yhat'], mode='lines',
         line=dict(color='blue'), name='Forecast',
         hovertemplate='Date: %{x|%Y-%m-%d}<br>Fit: %{y:.2f}<extra></extra>'
     ))
+    # Confidence band:
     fig.add_trace(go.Scatter(
         x=pd.concat([fc['ds'], fc['ds'][::-1]]),
         y=pd.concat([fc['yhat_upper'], fc['yhat_lower'][::-1]]),
@@ -169,7 +189,7 @@ def get_prophet_chart(df, ticker, wave2_date=None):
         name='95% Interval',
         hoverinfo='skip'
     ))
-
+    # Wave‐2 marker (optional)
     if wave2_date is not None:
         price_w2 = df.loc[df['Date'].dt.date == wave2_date, 'Close'].iloc[0]
         fig.add_trace(go.Scatter(
@@ -342,7 +362,13 @@ with tab3:
             df = fetch_price_data(token_map[sym], o_start, o_end)
             time.sleep(0.4)
 
-            df['ds'] = df['Date'].dt.normalize()
+            # 1) Ensure 'ds' column is tz-naive
+            df['ds'] = df['Date']
+            try:
+                df['ds'] = pd.to_datetime(df['ds']).dt.tz_convert(None)
+            except (AttributeError, TypeError):
+                df['ds'] = pd.to_datetime(df['ds'])
+
             dfp = (
                 df[['ds','Close']]
                 .rename(columns={'ds':'ds','Close':'y'})
@@ -352,6 +378,7 @@ with tab3:
                 prog.progress(i / len(symbols))
                 continue
 
+            # 2) Fit Prophet and detect outliers
             m   = Prophet(daily_seasonality=True)
             m.fit(dfp)
             fc2 = m.predict(m.make_future_dataframe(periods=0))
@@ -403,13 +430,17 @@ with tab3:
                 dfc = fetch_price_data(token_map[ticker], o_start, o_end)
                 time.sleep(0.4)
 
-                dfc['ds'] = dfc['Date'].dt.normalize()
+                dfc['ds'] = dfc['Date']
+                try:
+                    dfc['ds'] = pd.to_datetime(dfc['ds']).dt.tz_convert(None)
+                except (AttributeError, TypeError):
+                    dfc['ds'] = pd.to_datetime(dfc['ds'])
+
                 dfp2 = (
                     dfc[['ds','Close']]
                     .rename(columns={'ds':'ds','Close':'y'})
                     .dropna(subset=['ds','y'])
                 )
-
                 m2  = Prophet(daily_seasonality=True)
                 m2.fit(dfp2)
                 fc2 = m2.predict(m2.make_future_dataframe(periods=0))
