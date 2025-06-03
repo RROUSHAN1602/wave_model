@@ -30,8 +30,8 @@ token_map   = load_token_map()
 all_symbols = list(token_map.keys())
 total       = len(all_symbols)
 
-# --- 2) Batch selector (500 symbols per batch) ---
-batch_size   = 500
+# --- 2) Batch selector (250 symbols per batch) ---
+batch_size   = 250
 n_batches    = math.ceil(total / batch_size)
 batch_labels = [
     f"{i} ({(i-1)*batch_size+1}–{min(i*batch_size, total)})"
@@ -131,7 +131,7 @@ def get_wave_chart(df, wave, ticker):
     )
     return fig
 
-# --- 7) Prophet chart builder (no tz_convert here) ---
+# --- 7) Prophet chart builder ---
 def get_prophet_chart(df, ticker, wave2_date=None):
     import pandas as pd
     import plotly.graph_objects as go
@@ -250,7 +250,7 @@ with tab1:
             if w:
                 wave_results.append({'Ticker': sym, **w})
             prog.progress(i / len(symbols))
-            time.sleep(0.4)  # throttle
+            time.sleep(0.4)
 
         if not wave_results:
             st.info("No stocks met the Elliott wave criteria.")
@@ -296,7 +296,7 @@ with tab2:
     st.header("Prophet Only")
     p_start = st.date_input("Start date", datetime.date.today() - datetime.timedelta(days=90), key="p1")
     p_end   = st.date_input("End date",   datetime.date.today(),                             key="p2")
-    ticker  = st.selectbox("Ticker", ["-- Select --"] + symbols,                             key="p3")
+    ticker  = st.selectbox("Ticker", ["-- Select --"] + all_symbols,                            key="p3")
 
     if ticker != "-- Select --" and st.button("▶️ Generate forecast", key="p4"):
         df_raw = fetch_price_data(token_map[ticker], p_start, p_end)
