@@ -1,3 +1,5 @@
+# app.py
+
 import math
 import time
 import datetime
@@ -11,6 +13,7 @@ import pyotp
 from prophet import Prophet
 from scipy.signal import argrelextrema
 from SmartApi.smartConnect import SmartConnect
+
 
 st.set_page_config(page_title="Wave & Prophet Scanner", layout="wide")
 
@@ -30,8 +33,8 @@ token_map   = load_token_map()
 all_symbols = list(token_map.keys())
 total       = len(all_symbols)
 
-# --- 2) Batch selector (250 symbols per batch) ---
-batch_size   = 250
+# --- 2) Batch selector (500 symbols per batch) ---
+batch_size   = 500
 n_batches    = math.ceil(total / batch_size)
 batch_labels = [
     f"{i} ({(i-1)*batch_size+1}–{min(i*batch_size, total)})"
@@ -66,15 +69,7 @@ def fetch_price_data(token: str, start_date: datetime.date, end_date: datetime.d
     resp = client.getCandleData(params)
     time.sleep(0.3)
     df = pd.DataFrame(resp["data"], columns=['Date','Open','High','Low','Close','Volume'])
-    
-    # ► Parse Date as datetime, then strip any timezone if present
-    dt = pd.to_datetime(df['Date'])
-    try:
-        dt = dt.dt.tz_convert(None)
-    except (AttributeError, TypeError):
-        # if `dt` is already tz‐naive, this will fail—ignore in that case
-        pass
-    df['Date'] = dt
+    df['Date'] = pd.to_datetime(df['Date']).dt.tz_convert(None)
     return df
 
 # --- 5) Elliott Wave detection ---
@@ -86,23 +81,18 @@ def identify_elliott_wave(df: pd.DataFrame):
     ]))
     if len(idxs) < 3:
         return None
-
     w1, w2, w3 = idxs[-3:]
     if close[w2] <= close[w1]:
         return None
-
     wave1 = close[w2] - close[w1]
     wave2 = close[w2] - close[w3]
     retrace = wave2 / wave1
     if not (0.382 <= retrace <= 0.618):
         return None
-
     prob = (1 - abs(retrace - 0.5)/0.118) * 100
     prob = max(50, min(prob, 90))
-
     vol1 = df['Volume'].iloc[w1:w2].mean()
     vol3 = df['Volume'].iloc[w3:].mean()
-
     return {
         'probability':        prob,
         'retracement':        retrace,
@@ -136,51 +126,44 @@ def get_wave_chart(df, wave, ticker):
     )
     return fig
 
-# --- 7) Prophet chart builder (strip tz from 'ds' before fitting) ---
+# --- Updated get_prophet_chart with data‐size guard ---
 def get_prophet_chart(df, ticker, wave2_date=None):
+    import streamlit as st
+    from prophet import Prophet
     import pandas as pd
     import plotly.graph_objects as go
-    from prophet import Prophet
-    import streamlit as st
 
-    # 1) Rename for Prophet (ds, y)
+    # 1) Prepare Prophet input
     dfp = df[['Date', 'Close']].rename(columns={'Date': 'ds', 'Close': 'y'})
-    dfp_clean = dfp.dropna(subset=['ds','y']).copy()
+    dfp_clean = dfp.dropna(subset=['ds', 'y'])
 
-    # 2) Ensure 'ds' is tz-naive
-    try:
-        dfp_clean['ds'] = pd.to_datetime(dfp_clean['ds']).dt.tz_convert(None)
-    except (AttributeError, TypeError):
-        # Already tz-naive, or no tz info → ignore
-        dfp_clean['ds'] = pd.to_datetime(dfp_clean['ds'])
-
-    # 3) Must have at least 2 rows
+    # 2) Guard: need at least 2 valid rows
     if len(dfp_clean) < 2:
         st.warning(f"Insufficient data to fit Prophet for {ticker}: need ≥2 valid rows.")
         return None, None
 
-    # 4) Fit Prophet
+    # 3) Fit and forecast
     m = Prophet(daily_seasonality=True)
     m.fit(dfp_clean)
     future = m.make_future_dataframe(periods=0)
     fc = m.predict(future)
 
-    # 5) Build Plotly figure
+    # 4) Build Plotly figure
     fig = go.Figure()
-    # Actual points:
+    # actual points
     fig.add_trace(go.Scatter(
         x=df['Date'], y=df['Close'], mode='markers',
         marker=dict(color='black', size=6),
         name='Actual',
         hovertemplate='Date: %{x|%Y-%m-%d}<br>Close: %{y:.2f}<extra></extra>'
     ))
-    # Forecast line:
+    # forecast line
     fig.add_trace(go.Scatter(
         x=fc['ds'], y=fc['yhat'], mode='lines',
         line=dict(color='blue'), name='Forecast',
         hovertemplate='Date: %{x|%Y-%m-%d}<br>Fit: %{y:.2f}<extra></extra>'
     ))
-    # Confidence band:
+    # confidence band
     fig.add_trace(go.Scatter(
         x=pd.concat([fc['ds'], fc['ds'][::-1]]),
         y=pd.concat([fc['yhat_upper'], fc['yhat_lower'][::-1]]),
@@ -189,7 +172,7 @@ def get_prophet_chart(df, ticker, wave2_date=None):
         name='95% Interval',
         hoverinfo='skip'
     ))
-    # Wave‐2 marker (optional)
+    # optional Wave 2 marker
     if wave2_date is not None:
         price_w2 = df.loc[df['Date'].dt.date == wave2_date, 'Close'].iloc[0]
         fig.add_trace(go.Scatter(
@@ -205,7 +188,9 @@ def get_prophet_chart(df, ticker, wave2_date=None):
         xaxis_title='Date', yaxis_title='Price',
         hovermode='x unified', height=350
     )
+
     return fig, fc
+
 
 # --- 8) Plotly Outlier chart ---
 def get_outlier_chart(dfc, fc2, dsel, ticker):
@@ -230,7 +215,7 @@ def get_outlier_chart(dfc, fc2, dsel, ticker):
         line=dict(color='rgba(255,255,255,0)'),
         showlegend=True, name='95% Interval', hoverinfo='skip'
     ))
-    out_val = dfc[dfc['Date'].dt.date == dsel]['Close'].iloc[0]
+    out_val = dfc[dfc['Date'].dt.date==dsel]['Close'].iloc[0]
     fig.add_trace(go.Scatter(
         x=[dsel], y=[out_val], mode='markers',
         marker=dict(color='red', size=10, symbol='x'),
@@ -255,22 +240,22 @@ tab1, tab2, tab3 = st.tabs([
     "⚠️ Outlier Filter"
 ])
 
-# Tab 1: Home (Wave Scan)
+# Tab 1: Home
 with tab1:
     st.header("Elliott Wave Scanner")
     start_date = st.date_input("Start date", datetime.date.today() - datetime.timedelta(days=90), key="w1")
-    end_date   = st.date_input("End date",   datetime.date.today(),                             key="w2")
+    end_date = st.date_input("End date", datetime.date.today(), key="w2")
 
     if st.button("▶️ Run wave scan"):
         wave_results = []
         prog = st.progress(0)
         for i, sym in enumerate(symbols, start=1):
             df = fetch_price_data(token_map[sym], start_date, end_date)
-            w  = identify_elliott_wave(df)
+            w = identify_elliott_wave(df)
             if w:
                 wave_results.append({'Ticker': sym, **w})
             prog.progress(i / len(symbols))
-            time.sleep(0.4)
+            time.sleep(0.4)  # 👈 Throttle to avoid API rate limit
 
         if not wave_results:
             st.info("No stocks met the Elliott wave criteria.")
@@ -299,7 +284,7 @@ with tab1:
             for row in df_wave.itertuples(index=False):
                 sym = row.Ticker
                 st.markdown(f"### {sym} · Prob {row.Probability:.1f}%")
-                dfc  = fetch_price_data(token_map[sym], start_date, end_date)
+                dfc = fetch_price_data(token_map[sym], start_date, end_date)
                 wave = identify_elliott_wave(dfc)
                 col1, col2 = st.columns(2)
                 with col1:
@@ -308,34 +293,42 @@ with tab1:
                     st.plotly_chart(fig1, use_container_width=True)
                 with col2:
                     st.markdown("**Prophet Fit (Wave 2 End)**")
-                    fig2, _ = get_prophet_chart(dfc, sym, wave['wave2_end_date'])
+                    fig2, _ = get_prophet_chart(
+                        dfc, sym, wave['wave2_end_date']
+                    )
                     st.plotly_chart(fig2, use_container_width=True)
 
 # Tab 2: Prophet Only
 with tab2:
     st.header("Prophet Only")
     p_start = st.date_input("Start date", datetime.date.today() - datetime.timedelta(days=90), key="p1")
-    p_end   = st.date_input("End date",   datetime.date.today(),                             key="p2")
-    ticker  = st.selectbox("Ticker", ["-- Select --"] + all_symbols,                            key="p3")
+    p_end   = st.date_input("End date",   datetime.date.today(),                            key="p2")
+    ticker  = st.selectbox("Ticker", ["-- Select --"] + symbols,                          key="p3")
 
     if ticker != "-- Select --" and st.button("▶️ Generate forecast", key="p4"):
+        # 1) Fetch raw OHLC data
         df_raw = fetch_price_data(token_map[ticker], p_start, p_end)
-        time.sleep(0.4)
+        time.sleep(0.4)  # throttle
 
         if df_raw.empty:
             st.warning("No data returned.")
         else:
+            # 2) Prepare and clean for Prophet
             dfp = (
                 df_raw[['Date','Close']]
                 .rename(columns={'Date':'ds','Close':'y'})
                 .dropna(subset=['ds','y'])
             )
+
+            # 3) Guard against too-few rows
             if len(dfp) < 2:
                 st.warning("Insufficient data to generate forecast (need ≥2 valid rows).")
             else:
+                # 4) Optional: mark Wave-2 end if wave exists
                 wave_data  = identify_elliott_wave(df_raw)
                 wave2_date = wave_data['wave2_end_date'] if wave_data else None
 
+                # 5) Plot & display
                 fig, fc2 = get_prophet_chart(df_raw, ticker, wave2_date)
                 st.plotly_chart(fig, use_container_width=True)
 
@@ -356,33 +349,31 @@ with tab3:
 
     if st.button("▶️ Find outliers", key="o3"):
         outliers = []
-        prog     = st.progress(0)
+        prog = st.progress(0)
 
         for i, sym in enumerate(symbols, start=1):
             df = fetch_price_data(token_map[sym], o_start, o_end)
             time.sleep(0.4)
 
-            # 1) Ensure 'ds' column is tz-naive
-            df['ds'] = df['Date']
-            try:
-                df['ds'] = pd.to_datetime(df['ds']).dt.tz_convert(None)
-            except (AttributeError, TypeError):
-                df['ds'] = pd.to_datetime(df['ds'])
-
+            # normalize date and prepare Prophet input
+            df['ds'] = df['Date'].dt.normalize()
             dfp = (
                 df[['ds','Close']]
                 .rename(columns={'ds':'ds','Close':'y'})
                 .dropna(subset=['ds','y'])
             )
+
+            # skip if too few data points
             if len(dfp) < 2:
                 prog.progress(i / len(symbols))
                 continue
 
-            # 2) Fit Prophet and detect outliers
-            m   = Prophet(daily_seasonality=True)
+            # fit and forecast
+            m = Prophet(daily_seasonality=True)
             m.fit(dfp)
             fc2 = m.predict(m.make_future_dataframe(periods=0))
 
+            # detect outliers
             merged = pd.merge(
                 df[['ds','Close']],
                 fc2[['ds','yhat','yhat_lower','yhat_upper']],
@@ -430,17 +421,13 @@ with tab3:
                 dfc = fetch_price_data(token_map[ticker], o_start, o_end)
                 time.sleep(0.4)
 
-                dfc['ds'] = dfc['Date']
-                try:
-                    dfc['ds'] = pd.to_datetime(dfc['ds']).dt.tz_convert(None)
-                except (AttributeError, TypeError):
-                    dfc['ds'] = pd.to_datetime(dfc['ds'])
-
+                dfc['ds'] = dfc['Date'].dt.normalize()
                 dfp2 = (
                     dfc[['ds','Close']]
                     .rename(columns={'ds':'ds','Close':'y'})
                     .dropna(subset=['ds','y'])
                 )
+
                 m2  = Prophet(daily_seasonality=True)
                 m2.fit(dfp2)
                 fc2 = m2.predict(m2.make_future_dataframe(periods=0))
