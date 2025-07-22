@@ -67,7 +67,7 @@ def fetch_price_data(token: str, start_date: datetime.date, end_date: datetime.d
         "todate":      f"{ed} 23:59"
     }
     resp = client.getCandleData(params)
-    time.sleep(0.8)
+    time.sleep(1.2)
     df = pd.DataFrame(resp["data"], columns=['Date','Open','High','Low','Close','Volume'])
     df['Date'] = pd.to_datetime(df['Date']).dt.tz_convert(None)
     return df
