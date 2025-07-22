@@ -366,9 +366,15 @@ with tab3:
         for i, sym in enumerate(symbols, start=1):
             df = fetch_price_data(token_map[sym], o_start, o_end)
             time.sleep(0.99)
-
-            # normalize date and prepare Prophet input
+        
+            # ✅ Safe check for empty/malformed DataFrame
+            if df.empty or 'Date' not in df.columns:
+                st.warning(f"⚠️ No data for {sym}. Skipping.")
+                prog.progress(i / len(symbols))
+                continue
+        
             df['ds'] = df['Date'].dt.normalize()
+
             dfp = (
                 df[['ds','Close']]
                 .rename(columns={'ds':'ds','Close':'y'})
