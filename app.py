@@ -262,12 +262,25 @@ with tab1:
         wave_results = []
         prog = st.progress(0)
         for i, sym in enumerate(symbols, start=1):
-            df = fetch_price_data(token_map[sym], start_date, end_date)
-            w = identify_elliott_wave(df)
-            if w:
-                wave_results.append({'Ticker': sym, **w})
+            try:
+                df = fetch_price_data(token_map[sym], start_date, end_date)
+                time.sleep(0.99)
+        
+                # ✅ Skip if empty or malformed
+                if df.empty or 'Date' not in df.columns or 'Close' not in df.columns:
+                    st.warning(f"⚠️ No valid data for {sym}. Skipping.")
+                    prog.progress(i / len(symbols))
+                    continue
+        
+                w = identify_elliott_wave(df)
+                if w:
+                    wave_results.append({'Ticker': sym, **w})
+        
+            except Exception as e:
+                st.warning(f"⚠️ Error with {sym}: {e}")
+            
             prog.progress(i / len(symbols))
-            time.sleep(0.99)  # 👈 Throttle to avoid API rate limit
+
 
         if not wave_results:
             st.info("No stocks met the Elliott wave criteria.")
@@ -357,7 +370,7 @@ with tab2:
 with tab3:
     st.header("Outlier Filter")
     o_start = st.date_input("History start", datetime.date.today() - datetime.timedelta(days=90), key="o1")
-    o_end   = st.date_input("History end",   datetime.date.today(),                             key="o2")
+    o_end   = st.date_input("History end",   datetime.date.today(),  key="o2")
 
     if st.button("▶️ Find outliers", key="o3"):
         outliers = []
