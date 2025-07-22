@@ -67,7 +67,7 @@ def fetch_price_data(token: str, start_date: datetime.date, end_date: datetime.d
         "todate":      f"{ed} 23:59"
     }
     resp = client.getCandleData(params)
-    time.sleep(1.2)
+    time.sleep(0.99)
     df = pd.DataFrame(resp["data"], columns=['Date','Open','High','Low','Close','Volume'])
     df['Date'] = pd.to_datetime(df['Date']).dt.tz_convert(None)
     return df
@@ -255,7 +255,7 @@ with tab1:
             if w:
                 wave_results.append({'Ticker': sym, **w})
             prog.progress(i / len(symbols))
-            time.sleep(0.4)  # 👈 Throttle to avoid API rate limit
+            time.sleep(0.99)  # 👈 Throttle to avoid API rate limit
 
         if not wave_results:
             st.info("No stocks met the Elliott wave criteria.")
@@ -308,7 +308,7 @@ with tab2:
     if ticker != "-- Select --" and st.button("▶️ Generate forecast", key="p4"):
         # 1) Fetch raw OHLC data
         df_raw = fetch_price_data(token_map[ticker], p_start, p_end)
-        time.sleep(0.4)  # throttle
+        time.sleep(0.99)  # throttle
 
         if df_raw.empty:
             st.warning("No data returned.")
@@ -353,7 +353,7 @@ with tab3:
 
         for i, sym in enumerate(symbols, start=1):
             df = fetch_price_data(token_map[sym], o_start, o_end)
-            time.sleep(0.4)
+            time.sleep(0.99)
 
             # normalize date and prepare Prophet input
             df['ds'] = df['Date'].dt.normalize()
