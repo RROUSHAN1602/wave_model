@@ -57,7 +57,7 @@ client = angel_login()
 
 # --- 4) Fetch historical OHLCV (throttle 0.3s) ---
 @st.cache_data
-def fetch_price_data(token: str, start_date: datetime.date, end_date: datetime.date) -> pd.DataFrame:
+def fetch_price_data(token: str, start_date, end_date) -> pd.DataFrame:
     sd, ed = start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")
     params = {
         "exchange":    "NSE",
@@ -66,11 +66,22 @@ def fetch_price_data(token: str, start_date: datetime.date, end_date: datetime.d
         "fromdate":    f"{sd} 00:00",
         "todate":      f"{ed} 23:59"
     }
+
     resp = client.getCandleData(params)
-    time.sleep(0.99)
+    time.sleep(0.8)
+
+    if not resp.get("status") or not resp.get("data"):
+        return pd.DataFrame()  # Handle failed request
+
     df = pd.DataFrame(resp["data"], columns=['Date','Open','High','Low','Close','Volume'])
     df['Date'] = pd.to_datetime(df['Date'])
-    df['Date'] = df['Date'].dt.tz_localize('UTC').dt.tz_convert(None)
+
+    # Handle tz-naive or tz-aware dynamically
+    if df['Date'].dt.tz is None:
+        df['Date'] = df['Date'].dt.tz_localize('UTC').dt.tz_convert(None)
+    else:
+        df['Date'] = df['Date'].dt.tz_convert(None)
+
     return df
 
 # --- 5) Elliott Wave detection ---
