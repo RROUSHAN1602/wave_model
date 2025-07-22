@@ -328,7 +328,8 @@ with tab2:
     st.header("Prophet Only")
     p_start = st.date_input("Start date", datetime.date.today() - datetime.timedelta(days=90), key="p1")
     p_end   = st.date_input("End date",   datetime.date.today(),                            key="p2")
-    ticker  = st.selectbox("Ticker", ["-- Select --"] + symbols,                          key="p3")
+    ticker  = st.selectbox("Ticker", ["-- Select --"] + all_symbols,                       key="p3")
+
 
     if ticker != "-- Select --" and st.button("▶️ Generate forecast", key="p4"):
         # 1) Fetch raw OHLC data
