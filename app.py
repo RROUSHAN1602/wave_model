@@ -69,7 +69,8 @@ def fetch_price_data(token: str, start_date: datetime.date, end_date: datetime.d
     resp = client.getCandleData(params)
     time.sleep(0.99)
     df = pd.DataFrame(resp["data"], columns=['Date','Open','High','Low','Close','Volume'])
-    df['Date'] = pd.to_datetime(df['Date']).dt.tz_convert(None)
+    df['Date'] = pd.to_datetime(df['Date'])
+    df['Date'] = df['Date'].dt.tz_localize('UTC').dt.tz_convert(None)
     return df
 
 # --- 5) Elliott Wave detection ---
