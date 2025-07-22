@@ -34,7 +34,7 @@ all_symbols = list(token_map.keys())
 total       = len(all_symbols)
 
 # --- 2) Batch selector (500 symbols per batch) ---
-batch_size   = 500
+batch_size   = 250
 n_batches    = math.ceil(total / batch_size)
 batch_labels = [
     f"{i} ({(i-1)*batch_size+1}–{min(i*batch_size, total)})"
@@ -67,7 +67,7 @@ def fetch_price_data(token: str, start_date: datetime.date, end_date: datetime.d
         "todate":      f"{ed} 23:59"
     }
     resp = client.getCandleData(params)
-    time.sleep(0.3)
+    time.sleep(0.4)
     df = pd.DataFrame(resp["data"], columns=['Date','Open','High','Low','Close','Volume'])
     df['Date'] = pd.to_datetime(df['Date']).dt.tz_convert(None)
     return df
